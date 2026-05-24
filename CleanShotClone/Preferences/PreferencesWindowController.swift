@@ -76,6 +76,25 @@ class PreferencesWindowController: NSWindowController {
         view.addSubview(langPopup)
         y -= 36
 
+        // Startup section
+        let startupHeader = NSTextField(labelWithString: "STARTUP")
+        startupHeader.frame = CGRect(x: 20, y: y, width: 200, height: 14)
+        startupHeader.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+        startupHeader.textColor = .tertiaryLabelColor
+        view.addSubview(startupHeader)
+        y -= 22
+
+        let launchAtLoginCheck = NSButton(
+            checkboxWithTitle: "Launch ZenbuShot at login",
+            target: self,
+            action: #selector(launchAtLoginToggled(_:))
+        )
+        launchAtLoginCheck.state = LoginItemManager.isEnabled ? .on : .off
+        launchAtLoginCheck.tag = 203
+        launchAtLoginCheck.frame.origin = CGPoint(x: 20, y: y)
+        view.addSubview(launchAtLoginCheck)
+        y -= 30
+
         // Section header
         let captureHeader = NSTextField(labelWithString: L("prefs.capture"))
         captureHeader.frame = CGRect(x: 20, y: y, width: 200, height: 14)
@@ -546,6 +565,38 @@ class PreferencesWindowController: NSWindowController {
 
     @objc private func overrideShortcutsToggled(_ sender: NSButton) {
         UserSettings.shared.overrideSystemShortcuts = sender.state == .on
+    }
+
+    @objc private func launchAtLoginToggled(_ sender: NSButton) {
+        let wanted = sender.state == .on
+        let ok = LoginItemManager.setEnabled(wanted)
+
+        if !ok {
+            // Revert UI to actual system state and warn the user.
+            sender.state = LoginItemManager.isEnabled ? .on : .off
+            let alert = NSAlert()
+            alert.messageText = "Couldn't update Login Items"
+            alert.informativeText = "ZenbuShot was unable to change the Launch at Login setting. You can configure it manually in System Settings → General → Login Items."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Open System Settings")
+            if alert.runModal() == .alertSecondButtonReturn {
+                LoginItemManager.openSystemSettings()
+            }
+            return
+        }
+
+        if wanted && LoginItemManager.requiresApproval {
+            let alert = NSAlert()
+            alert.messageText = "Approval Required"
+            alert.informativeText = "macOS needs you to approve ZenbuShot in System Settings → General → Login Items before it will launch automatically."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Later")
+            if alert.runModal() == .alertFirstButtonReturn {
+                LoginItemManager.openSystemSettings()
+            }
+        }
     }
 
     @objc private func browseSaveDir() {

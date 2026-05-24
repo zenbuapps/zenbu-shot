@@ -37,6 +37,7 @@ swiftc \
     -framework Carbon \
     -framework AVFoundation \
     -framework CoreMedia \
+    -framework ServiceManagement \
     $SWIFT_FILES
 
 # Check if binary actually changed
