@@ -206,6 +206,33 @@ class PreferencesWindowController: NSWindowController {
 
         var y: CGFloat = 20
 
+        // === macOS Integration: override built-in screenshot shortcuts ===
+        let overrideHeader = NSTextField(labelWithString: "MACOS INTEGRATION")
+        overrideHeader.frame = CGRect(x: 20, y: y, width: 300, height: 16)
+        overrideHeader.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+        overrideHeader.textColor = .tertiaryLabelColor
+        view.addSubview(overrideHeader)
+        y += 22
+
+        let overrideCheck = NSButton(
+            checkboxWithTitle: "Override macOS screenshot shortcuts (Cmd+Shift+3/4/5/6)",
+            target: self,
+            action: #selector(overrideShortcutsToggled(_:))
+        )
+        overrideCheck.frame = CGRect(x: 20, y: y, width: 440, height: 18)
+        overrideCheck.state = UserSettings.shared.overrideSystemShortcuts ? .on : .off
+        view.addSubview(overrideCheck)
+        y += 22
+
+        let overrideDesc = NSTextField(wrappingLabelWithString:
+            "Required for Cmd+Shift+3/4/5/6 to trigger ZenbuShot instead of macOS built-in screenshots. Modifies macOS settings — you must log out and back in for changes to take effect."
+        )
+        overrideDesc.frame = CGRect(x: 38, y: y, width: 420, height: 34)
+        overrideDesc.font = NSFont.systemFont(ofSize: 11)
+        overrideDesc.textColor = .secondaryLabelColor
+        view.addSubview(overrideDesc)
+        y += 44
+
         for (groupTitle, shortcuts) in shortcutGroups {
             let header = NSTextField(labelWithString: groupTitle.uppercased())
             header.frame = CGRect(x: 20, y: y, width: 200, height: 16)
