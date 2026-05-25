@@ -286,14 +286,23 @@ class AreaSelectionView: NSView {
 
     // MARK: - Drawing helpers
 
+    // Cached once: drawDimensionLabel runs every frame during drag.
+    // Rebuilding the font/attributes per-frame triggers a race in CoreText's
+    // font cache on macOS 26.x that crashes with NSInvalidArgumentException
+    // ("attempt to insert nil object from objects[0]") inside CTLine creation.
+    // Using a concrete font ("Menlo") sidesteps the flaky system-font path.
+    private static let labelFont: NSFont = NSFont(name: "Menlo", size: 12)
+        ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+    private static let labelAttributes: [NSAttributedString.Key: Any] = [
+        .font: AreaSelectionView.labelFont,
+        .foregroundColor: NSColor.white,
+    ]
+
     private func drawDimensionLabel(for rect: CGRect, in context: CGContext) {
         let width = Int(rect.width * screenBackingScale)
         let height = Int(rect.height * screenBackingScale)
         let text = "\(width) × \(height)" as NSString
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white,
-        ]
+        let attributes = AreaSelectionView.labelAttributes
         let textSize = text.size(withAttributes: attributes)
         let padding: CGFloat = 8
         let labelWidth = textSize.width + padding * 2
