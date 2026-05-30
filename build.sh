@@ -35,6 +35,7 @@ swiftc \
     -framework Vision \
     -framework CoreImage \
     -framework Carbon \
+    -framework IOKit \
     -framework AVFoundation \
     -framework CoreMedia \
     -framework ServiceManagement \
@@ -103,12 +104,15 @@ echo -n "APPL????" > "$CONTENTS/PkgInfo"
 # Sign with hardened runtime + entitlements (required for TCC microphone/camera access)
 ENTITLEMENTS="$(dirname "$0")/ZenbuShot.entitlements"
 echo "Signing with hardened runtime + entitlements..."
-codesign --force --deep --sign "36F0B6705A9F3FF9BA39E6AC4603258A7965EA02" \
+# 優先用 Developer ID 簽章：它的 designated requirement 綁定 Team ID（不綁 cdhash），
+# 所以每次重編 TCC 的輔助使用/輸入監控/螢幕錄製授權都不會失效。
+# 自簽（AnyShot Developer）是 fallback，但每次重編 cdhash 一變授權就會掉，要重新授權。
+codesign --force --deep --sign "Developer ID Application: Hao Hsu (V6ZDDG5Z68)" \
     --options runtime \
     --entitlements "$ENTITLEMENTS" \
     "$APP_BUNDLE" 2>&1 || {
-    echo "Warning: ZenbuShot Developer signing failed, trying Developer ID..."
-    codesign --force --deep --sign "Developer ID Application: Hao Hsu (V6ZDDG5Z68)" \
+    echo "Warning: Developer ID 簽署失敗，改用自簽 AnyShot Developer（每次重編需重新授權）..."
+    codesign --force --deep --sign "36F0B6705A9F3FF9BA39E6AC4603258A7965EA02" \
         --options runtime \
         --entitlements "$ENTITLEMENTS" \
         "$APP_BUNDLE" 2>&1 || {

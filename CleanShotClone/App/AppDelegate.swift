@@ -1,4 +1,5 @@
 import AppKit
+import IOKit.hid
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController!
@@ -19,6 +20,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !AXIsProcessTrusted() {
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(options)
+        }
+
+        // Request Input Monitoring. A keyboard CGEventTap needs BOTH Accessibility
+        // (to create the active tap) AND Input Monitoring (to actually receive
+        // keyDown events). Without this the tap reports enabled=true but silently
+        // receives nothing — which is exactly why every hotkey was dead.
+        let imAccess = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
+        HotkeyManager.dbg("InputMonitoring on launch = \(imAccess.rawValue) (0=granted 1=denied 2=unknown)")
+        if imAccess != kIOHIDAccessTypeGranted {
+            IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
         }
 
         // Setup menu bar
