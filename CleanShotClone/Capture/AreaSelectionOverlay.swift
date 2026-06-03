@@ -42,8 +42,15 @@ class AreaSelectionOverlay: NSObject {
             window.acceptsMouseMovedEvents = true
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             window.hidesOnDeactivate = false
+            // Skip the default fade-in animation — the dim layer should be
+            // visible the instant the overlay appears.
+            window.animationBehavior = .none
 
             let view = AreaSelectionView(frame: NSRect(origin: .zero, size: screenFrame.size))
+            // Core Animation rendering — the first display happens via
+            // CATransaction at end of runloop rather than waiting for a CG
+            // draw cycle, so the dim shows up with the window.
+            view.wantsLayer = true
             view.screenBackingScale = screen.backingScaleFactor
             view.associatedScreen = screen
             // Pass frozen image for this screen if available
@@ -80,7 +87,6 @@ class AreaSelectionOverlay: NSObject {
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
     private var localMouseMonitor: Any?
-    private var cursorTimer: Timer?
 
     private func setupGlobalMouseMonitor() {
         // Monitor mouse events globally so they work across all screens
@@ -103,11 +109,9 @@ class AreaSelectionOverlay: NSObject {
             return event
         }
 
-        // Force crosshair cursor continuously while overlay is visible
+        // Initial cursor — the per-view tracking area takes over once the
+        // cursor enters an AreaSelectionView.
         NSCursor.crosshair.set()
-        cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            NSCursor.crosshair.set()
-        }
     }
 
     private func handleGlobalMouse(_ event: NSEvent) {
@@ -143,9 +147,8 @@ class AreaSelectionOverlay: NSObject {
     }
 
     func dismiss() {
-        // Stop cursor timer and restore normal cursor
-        cursorTimer?.invalidate()
-        cursorTimer = nil
+        // Restore normal cursor — pop the crosshair pushed in show().
+        NSCursor.pop()
         NSCursor.arrow.set()
 
         // Remove all event monitors
@@ -174,6 +177,50 @@ class AreaSelectionView: NSView {
         discardCursorRects()
         addCursorRect(bounds, cursor: .crosshair)
     }
+
+    // The overlay window lives at NSWindow.Level.screenSaver, where AppKit's
+    // standard cursor-rect plumbing doesn't fire reliably. Drive the cursor
+    // explicitly via a tracking area + cursorUpdate override (the dedicated
+    // NSResponder callback for cursor management).
+    private var cursorTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = cursorTrackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        cursorTrackingArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.crosshair.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.crosshair.set()
+    }
+
+    // Fires when the view is added to its window — the cursor may already be
+    // inside the window's bounds (no enter event will fire), so set the
+    // crosshair and force the cursor-rect machinery to re-evaluate immediately
+    // and again on the next runloop tick. (The stack push/pop is balanced once
+    // per overlay in AreaSelectionOverlay.show()/dismiss(); here we only set.)
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window = window else { return }
+        NSCursor.crosshair.set()
+        window.invalidateCursorRects(for: self)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let window = self.window else { return }
+            NSCursor.crosshair.set()
+            window.invalidateCursorRects(for: self)
+        }
+    }
     var frozenImage: NSImage?
     var screenBackingScale: CGFloat = 2.0
     var associatedScreen: NSScreen?
@@ -190,25 +237,31 @@ class AreaSelectionView: NSView {
         super.draw(dirtyRect)
         guard let context = NSGraphicsContext.current?.cgContext else { return }
 
-        // Draw frozen image if available
-        if let frozenImage = frozenImage, let cgImage = frozenImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            context.draw(cgImage, in: bounds)
-        }
+        let frozenCGImage = frozenImage?.cgImage(forProposedRect: nil, context: nil, hints: nil)
 
-        // Dim overlay
-        context.setFillColor(NSColor.black.withAlphaComponent(0.3).cgColor)
-        context.fill(bounds)
+        // Freeze mode (Cmd+Shift+F): paint the frozen snapshot and dim it so the
+        // "frozen" state reads clearly and the selection can be punched back to
+        // full brightness. Normal area mode draws NO background at all — the
+        // overlay stays fully transparent so the live screen never greys out.
+        // (The dim must never be drawn in normal mode: the screenshot is cropped
+        // from a pre-capture, but a visible grey screen is itself the complaint.)
+        if let frozenCGImage = frozenCGImage {
+            context.draw(frozenCGImage, in: bounds)
+            context.setFillColor(NSColor.black.withAlphaComponent(0.3).cgColor)
+            context.fill(bounds)
+        }
 
         // Selection
         if let rect = normalizedSelectionRect {
-            context.setBlendMode(.clear)
-            context.fill(rect)
-            context.setBlendMode(.normal)
-
-            if let frozenImage = frozenImage, let cgImage = frozenImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            // Freeze mode only: clear the dim over the selection and redraw the
+            // frozen image there so the chosen region shows at full brightness.
+            if let frozenCGImage = frozenCGImage {
+                context.setBlendMode(.clear)
+                context.fill(rect)
+                context.setBlendMode(.normal)
                 context.saveGState()
                 context.clip(to: rect)
-                context.draw(cgImage, in: bounds)
+                context.draw(frozenCGImage, in: bounds)
                 context.restoreGState()
             }
 
@@ -244,6 +297,10 @@ class AreaSelectionView: NSView {
         selectionEnd = point
         currentMouseLocation = point
         needsDisplay = true
+        // Force-set crosshair on every drag — cursorUpdate only fires on
+        // tracking-area entry, which misses the case where the cursor was
+        // already inside the overlay when it appeared.
+        NSCursor.crosshair.set()
     }
 
     func handleMouseUp(at point: NSPoint) {
@@ -256,6 +313,9 @@ class AreaSelectionView: NSView {
 
     func handleMouseMoved(at point: NSPoint) {
         currentMouseLocation = point
+        // Same reason as in handleMouseDragged — guarantee crosshair on every
+        // mouse movement regardless of cursor-rect / tracking-area timing.
+        NSCursor.crosshair.set()
     }
 
     // MARK: - Keyboard (received when this view is first responder)

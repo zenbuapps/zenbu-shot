@@ -82,7 +82,13 @@ class CaptureCoordinator {
         NSApp.activate(ignoringOtherApps: true)
         installEscMonitor()
 
-        // Capture all screens BEFORE showing overlay
+        // Capture every screen CLEANLY, BEFORE the overlay is shown. The overlay
+        // is fully transparent (no dim), but we still crop the final image from
+        // this pre-capture so nothing drawn on the overlay — the selection
+        // border, handles, crosshair guides — can ever bleed into the
+        // screenshot. Capturing AFTER the overlay was on screen is exactly what
+        // produced the "everything looks grey" bug: CGDisplayCreateImage grabs
+        // the whole display, including our own overlay window.
         areaPreCaptures.removeAll()
         for screen in NSScreen.screens {
             let key = "\(screen.displayID)"
@@ -106,13 +112,20 @@ class CaptureCoordinator {
         removeEscMonitor()
 
         let key = "\(screen.displayID)"
-        guard let preCapture = areaPreCaptures[key] else {
+        var preCapture = areaPreCaptures[key]
+        areaPreCaptures.removeAll()
+
+        // Fallback: pre-capture missing — grab it inline now that the overlay is
+        // already dismissed, so the overlay still can't land in the image.
+        if preCapture == nil {
+            preCapture = ScreenCapturer.captureScreen(screen)
+        }
+
+        guard let preCapture = preCapture else {
             showCaptureError(L("alert.capture.error"))
             state = .idle
-            areaPreCaptures.removeAll()
             return
         }
-        areaPreCaptures.removeAll()
 
         guard let croppedImage = preCapture.cropped(to: rect) else {
             showCaptureError(L("alert.capture.error"))
@@ -299,12 +312,11 @@ class CaptureCoordinator {
     private func startFreezeCapture() {
         state = .selectingArea
 
-        // Capture all screens first
+        // Capture all screens first — freeze mode shows these as static images.
         areaPreCaptures.removeAll()
         for screen in NSScreen.screens {
             if let image = ScreenCapturer.captureScreen(screen) {
-                let key = "\(screen.displayID)"
-                areaPreCaptures[key] = image
+                areaPreCaptures["\(screen.displayID)"] = image
             }
         }
 
